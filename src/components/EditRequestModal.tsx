@@ -19,27 +19,35 @@ const PRODUCER_OPTIONS = [
   { name: '외주', activeBg: 'bg-[#181715] text-[#EAE2D3] border-[#181715]' },
 ] as const;
 
-const parseSubCategoriesWithCount = (
+const parseSubCategoriesWithCounts = (
   raw: string | undefined
-): { names: string[]; compCountInput: string } => {
-  if (!raw) return { names: [], compCountInput: '' };
-  let compCountInput = '';
+): { names: string[]; countInputs: Record<string, string> } => {
+  if (!raw) return { names: [], countInputs: {} };
+  const countInputs: Record<string, string> = {};
   const names = raw
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
     .map((token) => {
-      const match = token.match(/^구성 추가\((\d+)개\)$/);
-      if (match) {
-        const count = parseInt(match[1], 10);
+      const compMatch = token.match(/^구성 추가\((\d+)개\)$/);
+      if (compMatch) {
+        const count = parseInt(compMatch[1], 10);
         if (!isNaN(count) && count > 1) {
-          compCountInput = String(count);
+          countInputs['구성 추가'] = String(Math.min(99, count));
         }
         return '구성 추가';
       }
+      const shootMatch = token.match(/^촬영\((\d+)일\)$/);
+      if (shootMatch) {
+        const count = parseInt(shootMatch[1], 10);
+        if (!isNaN(count) && count > 1) {
+          countInputs['촬영'] = String(Math.min(99, count));
+        }
+        return '촬영';
+      }
       return token;
     });
-  return { names, compCountInput };
+  return { names, countInputs };
 };
 
 const stripParens = (val: string | undefined, fallback: string): string => {
@@ -59,7 +67,7 @@ export const EditRequestModal: React.FC<EditRequestModalProps> = ({
   onClose,
   onSave,
 }) => {
-  const initialParsedSubs = parseSubCategoriesWithCount(request?.subCategory);
+  const initialParsedSubs = parseSubCategoriesWithCounts(request?.subCategory);
   const [headquarters, setHeadquarters] = useState<string>(request?.headquarters || '');
   const [team, setTeam] = useState<string>(request?.team || '');
   const [requesterName, setRequesterName] = useState<string>(request?.requesterName || '');
@@ -67,8 +75,8 @@ export const EditRequestModal: React.FC<EditRequestModalProps> = ({
   const [selectedSubCategories, setSelectedSubCategories] = useState<string[]>(
     initialParsedSubs.names
   );
-  const [addCompCountInput, setAddCompCountInput] = useState<string>(
-    initialParsedSubs.compCountInput
+  const [subCountInputs, setSubCountInputs] = useState<Record<string, string>>(
+    initialParsedSubs.countInputs
   );
   const [taskName, setTaskName] = useState<string>(request?.taskName || '');
   const [requiredDays, setRequiredDays] = useState<number>(Math.round(request?.requiredDays || 1));
@@ -84,24 +92,28 @@ export const EditRequestModal: React.FC<EditRequestModalProps> = ({
   const [newPassword, setNewPassword] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string>('');
 
-  const isAddComposition = (name: string) => name === '구성 추가';
-  const getEffectiveAddCompCount = (raw: string): number => {
-    const parsed = parseInt(raw, 10);
+  const isQuantifiableSub = (name: string) => name === '구성 추가' || name === '촬영';
+  const getSubQuantityUnit = (name: string) => (name === '촬영' ? '일' : '개');
+  const getSubQuantityLabel = (name: string) =>
+    name === '촬영' ? '촬영 일수 (미입력 시 1일)' : '개수 (미입력 시 1개)';
+
+  const getEffectiveSubCount = (name: string, inputs: Record<string, string>): number => {
+    if (!isQuantifiableSub(name)) return 1;
+    const parsed = parseInt(inputs[name] || '', 10);
     return !isNaN(parsed) && parsed > 0 ? Math.min(99, parsed) : 1;
   };
-  const effectiveAddCompCount = getEffectiveAddCompCount(addCompCountInput);
 
   const calcTotalRequiredDays = (
     majorObj: MajorCategory | undefined,
     selectedNames: string[],
-    compCount: number
+    inputs: Record<string, string>
   ): number => {
     if (!majorObj) return 0;
     return Math.round(
       majorObj.subcategories
         .filter((s) => selectedNames.includes(s.name))
         .reduce((sum, s) => {
-          const qty = isAddComposition(s.name) ? compCount : 1;
+          const qty = getEffectiveSubCount(s.name, inputs);
           return sum + (Number(s.defaultDays) || 0) * qty;
         }, 0)
     );
@@ -109,13 +121,13 @@ export const EditRequestModal: React.FC<EditRequestModalProps> = ({
 
   useEffect(() => {
     if (request) {
-      const parsedSubs = parseSubCategoriesWithCount(request.subCategory);
+      const parsedSubs = parseSubCategoriesWithCounts(request.subCategory);
       setHeadquarters(request.headquarters);
       setTeam(request.team);
       setRequesterName(request.requesterName);
       setMajorCategory(request.majorCategory);
       setSelectedSubCategories(parsedSubs.names);
-      setAddCompCountInput(parsedSubs.compCountInput);
+      setSubCountInputs(parsedSubs.countInputs);
       setTaskName(request.taskName);
       setRequiredDays(Math.round(request.requiredDays));
       setDueDate(request.dueDate);
@@ -134,7 +146,7 @@ export const EditRequestModal: React.FC<EditRequestModalProps> = ({
 
   const handleMajorCategoryChange = (newMajor: string) => {
     setMajorCategory(newMajor);
-    setAddCompCountInput('');
+    setSubCountInputs({});
     const majorObj = categories.find((c) => c.name === newMajor);
     if (majorObj && majorObj.subcategories.length > 0) {
       const firstSub = majorObj.subcategories[0];
@@ -152,18 +164,19 @@ export const EditRequestModal: React.FC<EditRequestModalProps> = ({
       ? selectedSubCategories.filter((name) => name !== subName)
       : [...selectedSubCategories, subName];
 
-    if (isAlreadySelected && isAddComposition(subName)) {
-      setAddCompCountInput('');
+    let nextInputs = subCountInputs;
+    if (isAlreadySelected && isQuantifiableSub(subName)) {
+      const updated = { ...subCountInputs };
+      delete updated[subName];
+      nextInputs = updated;
+      setSubCountInputs(updated);
     }
 
     const nextOrdered = currentMajorObj.subcategories
       .filter((s) => nextRaw.includes(s.name))
       .map((s) => s.name);
 
-    const nextCompCount =
-      isAlreadySelected && isAddComposition(subName) ? 1 : effectiveAddCompCount;
-
-    const totalDays = calcTotalRequiredDays(currentMajorObj, nextOrdered, nextCompCount);
+    const totalDays = calcTotalRequiredDays(currentMajorObj, nextOrdered, nextInputs);
 
     setSelectedSubCategories(nextOrdered);
     if (nextOrdered.length > 0) {
@@ -173,11 +186,11 @@ export const EditRequestModal: React.FC<EditRequestModalProps> = ({
     }
   };
 
-  const handleAddCompCountChange = (rawValue: string) => {
+  const handleSubCountChange = (subName: string, rawValue: string) => {
     const digitsOnly = rawValue.replace(/[^\d]/g, '');
-    setAddCompCountInput(digitsOnly);
-    const nextCount = getEffectiveAddCompCount(digitsOnly);
-    const totalDays = calcTotalRequiredDays(currentMajorObj, selectedSubCategories, nextCount);
+    const nextInputs = { ...subCountInputs, [subName]: digitsOnly };
+    setSubCountInputs(nextInputs);
+    const totalDays = calcTotalRequiredDays(currentMajorObj, selectedSubCategories, nextInputs);
     if (selectedSubCategories.length > 0) {
       setRequiredDays(totalDays);
     }
@@ -216,11 +229,12 @@ export const EditRequestModal: React.FC<EditRequestModalProps> = ({
       return;
     }
 
-    const formattedSubCategories = selectedSubCategories.map((name) =>
-      isAddComposition(name) && effectiveAddCompCount > 1
-        ? `${name}(${effectiveAddCompCount}개)`
-        : name
-    );
+    const formattedSubCategories = selectedSubCategories.map((name) => {
+      const qty = getEffectiveSubCount(name, subCountInputs);
+      return isQuantifiableSub(name) && qty > 1
+        ? `${name}(${qty}${getSubQuantityUnit(name)})`
+        : name;
+    });
 
     const updatedRequest: VideoRequest = {
       ...request,
@@ -407,8 +421,8 @@ export const EditRequestModal: React.FC<EditRequestModalProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                     {currentMajorObj?.subcategories.map((s) => {
                       const isChecked = selectedSubCategories.includes(s.name);
-                      const isCompItem = isAddComposition(s.name);
-                      const subQty = isChecked && isCompItem ? effectiveAddCompCount : 1;
+                      const isQuantifiable = isQuantifiableSub(s.name);
+                      const subQty = isChecked ? getEffectiveSubCount(s.name, subCountInputs) : 1;
                       const subTotalDays = Math.round((Number(s.defaultDays) || 0) * subQty);
 
                       return (
@@ -447,13 +461,13 @@ export const EditRequestModal: React.FC<EditRequestModalProps> = ({
                               {subTotalDays}일
                             </span>
                           </div>
-                          {isChecked && isCompItem && (
+                          {isChecked && isQuantifiable && (
                             <div
                               className="mt-2 pt-1.5 border-t border-[#181715]/12 flex items-center justify-between gap-2"
                               onClick={(e) => e.stopPropagation()}
                             >
                               <span className="text-[10px] font-semibold text-[#5F5A52]">
-                                개수 (미입력 시 1개)
+                                {getSubQuantityLabel(s.name)}
                               </span>
                               <div className="flex items-center gap-1">
                                 <input
@@ -462,11 +476,13 @@ export const EditRequestModal: React.FC<EditRequestModalProps> = ({
                                   max={99}
                                   step={1}
                                   placeholder="1"
-                                  value={addCompCountInput}
-                                  onChange={(e) => handleAddCompCountChange(e.target.value)}
+                                  value={subCountInputs[s.name] || ''}
+                                  onChange={(e) => handleSubCountChange(s.name, e.target.value)}
                                   className="w-12 text-center font-mono text-[11px] font-bold rounded-[2px] border border-[#181715]/30 bg-white px-1 py-0.5 text-[#181715] focus:border-[#181715] focus:outline-none"
                                 />
-                                <span className="text-[10px] font-semibold text-[#181715]">개</span>
+                                <span className="text-[10px] font-semibold text-[#181715]">
+                                  {getSubQuantityUnit(s.name)}
+                                </span>
                               </div>
                             </div>
                           )}

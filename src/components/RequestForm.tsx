@@ -39,7 +39,7 @@ export const RequestForm: React.FC<RequestFormProps> = ({
 
   const [majorCategory, setMajorCategory] = useState<string>(categories[0]?.name || '');
   const [selectedSubCategories, setSelectedSubCategories] = useState<string[]>([]);
-  const [addCompCountInput, setAddCompCountInput] = useState<string>('');
+  const [subCountInputs, setSubCountInputs] = useState<Record<string, string>>({});
   const [taskName, setTaskName] = useState<string>('');
   const [requiredDays, setRequiredDays] = useState<number>(0);
   const [dueDate, setDueDate] = useState<string>('');
@@ -49,24 +49,28 @@ export const RequestForm: React.FC<RequestFormProps> = ({
 
   const [errorMsg, setErrorMsg] = useState<string>('');
 
-  const isAddComposition = (name: string) => name === '구성 추가';
-  const getEffectiveAddCompCount = (raw: string): number => {
-    const parsed = parseInt(raw, 10);
+  const isQuantifiableSub = (name: string) => name === '구성 추가' || name === '촬영';
+  const getSubQuantityUnit = (name: string) => (name === '촬영' ? '일' : '개');
+  const getSubQuantityLabel = (name: string) =>
+    name === '촬영' ? '촬영 일수 (미입력 시 1일)' : '개수 (미입력 시 1개)';
+
+  const getEffectiveSubCount = (name: string, inputs: Record<string, string>): number => {
+    if (!isQuantifiableSub(name)) return 1;
+    const parsed = parseInt(inputs[name] || '', 10);
     return !isNaN(parsed) && parsed > 0 ? Math.min(99, parsed) : 1;
   };
-  const effectiveAddCompCount = getEffectiveAddCompCount(addCompCountInput);
 
   const calcTotalRequiredDays = (
     majorObj: MajorCategory | undefined,
     selectedNames: string[],
-    compCount: number
+    inputs: Record<string, string>
   ): number => {
     if (!majorObj) return 0;
     return Math.round(
       majorObj.subcategories
         .filter((s) => selectedNames.includes(s.name))
         .reduce((sum, s) => {
-          const qty = isAddComposition(s.name) ? compCount : 1;
+          const qty = getEffectiveSubCount(s.name, inputs);
           return sum + (Number(s.defaultDays) || 0) * qty;
         }, 0)
     );
@@ -80,11 +84,11 @@ export const RequestForm: React.FC<RequestFormProps> = ({
     if (currentMajorObj && currentMajorObj.subcategories.length > 0) {
       const firstSub = currentMajorObj.subcategories[0];
       setSelectedSubCategories([firstSub.name]);
-      setAddCompCountInput('');
+      setSubCountInputs({});
       setRequiredDays(Math.round(firstSub.defaultDays));
     } else {
       setSelectedSubCategories([]);
-      setAddCompCountInput('');
+      setSubCountInputs({});
       setRequiredDays(0);
     }
   }, [majorCategory, currentMajorObj]);
@@ -96,8 +100,12 @@ export const RequestForm: React.FC<RequestFormProps> = ({
       ? selectedSubCategories.filter((name) => name !== subName)
       : [...selectedSubCategories, subName];
 
-    if (isAlreadySelected && isAddComposition(subName)) {
-      setAddCompCountInput('');
+    let nextInputs = subCountInputs;
+    if (isAlreadySelected && isQuantifiableSub(subName)) {
+      const updated = { ...subCountInputs };
+      delete updated[subName];
+      nextInputs = updated;
+      setSubCountInputs(updated);
     }
 
     // Keep canonical order defined by the category list
@@ -105,18 +113,15 @@ export const RequestForm: React.FC<RequestFormProps> = ({
       .filter((s) => nextRaw.includes(s.name))
       .map((s) => s.name);
 
-    const nextCompCount =
-      isAlreadySelected && isAddComposition(subName) ? 1 : effectiveAddCompCount;
-
     setSelectedSubCategories(nextOrdered);
-    setRequiredDays(calcTotalRequiredDays(currentMajorObj, nextOrdered, nextCompCount));
+    setRequiredDays(calcTotalRequiredDays(currentMajorObj, nextOrdered, nextInputs));
   };
 
-  const handleAddCompCountChange = (rawValue: string) => {
+  const handleSubCountChange = (subName: string, rawValue: string) => {
     const digitsOnly = rawValue.replace(/[^\d]/g, '');
-    setAddCompCountInput(digitsOnly);
-    const nextCount = getEffectiveAddCompCount(digitsOnly);
-    setRequiredDays(calcTotalRequiredDays(currentMajorObj, selectedSubCategories, nextCount));
+    const nextInputs = { ...subCountInputs, [subName]: digitsOnly };
+    setSubCountInputs(nextInputs);
+    setRequiredDays(calcTotalRequiredDays(currentMajorObj, selectedSubCategories, nextInputs));
   };
 
   const willExceedCapacity = remainingDays <= 0 || requiredDays > remainingDays;
@@ -160,11 +165,12 @@ export const RequestForm: React.FC<RequestFormProps> = ({
       return;
     }
 
-    const formattedSubCategories = selectedSubCategories.map((name) =>
-      isAddComposition(name) && effectiveAddCompCount > 1
-        ? `${name}(${effectiveAddCompCount}개)`
-        : name
-    );
+    const formattedSubCategories = selectedSubCategories.map((name) => {
+      const qty = getEffectiveSubCount(name, subCountInputs);
+      return isQuantifiableSub(name) && qty > 1
+        ? `${name}(${qty}${getSubQuantityUnit(name)})`
+        : name;
+    });
 
     onSubmit({
       quarter: currentQuarter.id,
@@ -390,8 +396,8 @@ export const RequestForm: React.FC<RequestFormProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {currentMajorObj?.subcategories.map((sub) => {
                     const isChecked = selectedSubCategories.includes(sub.name);
-                    const isCompItem = isAddComposition(sub.name);
-                    const subQty = isChecked && isCompItem ? effectiveAddCompCount : 1;
+                    const isQuantifiable = isQuantifiableSub(sub.name);
+                    const subQty = isChecked ? getEffectiveSubCount(sub.name, subCountInputs) : 1;
                     const subTotalDays = Math.round((Number(sub.defaultDays) || 0) * subQty);
 
                     return (
@@ -436,13 +442,13 @@ export const RequestForm: React.FC<RequestFormProps> = ({
                               {sub.description}
                             </p>
                           )}
-                          {isChecked && isCompItem && (
+                          {isChecked && isQuantifiable && (
                             <div
                               className="mt-2 pt-2 border-t border-[#181715]/12 flex items-center justify-between gap-2"
                               onClick={(e) => e.stopPropagation()}
                             >
                               <span className="text-[11px] font-semibold text-[#5F5A52]">
-                                개수 (미입력 시 1개)
+                                {getSubQuantityLabel(sub.name)}
                               </span>
                               <div className="flex items-center gap-1">
                                 <input
@@ -451,11 +457,13 @@ export const RequestForm: React.FC<RequestFormProps> = ({
                                   max={99}
                                   step={1}
                                   placeholder="1"
-                                  value={addCompCountInput}
-                                  onChange={(e) => handleAddCompCountChange(e.target.value)}
+                                  value={subCountInputs[sub.name] || ''}
+                                  onChange={(e) => handleSubCountChange(sub.name, e.target.value)}
                                   className="w-14 text-center font-mono text-xs font-bold rounded-[2px] border border-[#181715]/30 bg-white px-1.5 py-0.5 text-[#181715] focus:border-[#181715] focus:outline-none"
                                 />
-                                <span className="text-[11px] font-semibold text-[#181715]">개</span>
+                                <span className="text-[11px] font-semibold text-[#181715]">
+                                  {getSubQuantityUnit(sub.name)}
+                                </span>
                               </div>
                             </div>
                           )}
@@ -485,11 +493,10 @@ export const RequestForm: React.FC<RequestFormProps> = ({
                         <strong className="text-[#181715]">
                           {selectedSubObjs
                             .map((s) => {
-                              const isCompItem = isAddComposition(s.name);
-                              const qty = isCompItem ? effectiveAddCompCount : 1;
+                              const qty = getEffectiveSubCount(s.name, subCountInputs);
                               const days = Math.round((Number(s.defaultDays) || 0) * qty);
-                              return isCompItem && qty > 1
-                                ? `${s.name} ${qty}개(${days}일)`
+                              return isQuantifiableSub(s.name) && qty > 1 && s.name !== '촬영'
+                                ? `${s.name} ${qty}${getSubQuantityUnit(s.name)}(${days}일)`
                                 : `${s.name}(${days}일)`;
                             })
                             .join(' + ')}
