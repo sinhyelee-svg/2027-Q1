@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, CheckCircle, User, Lock } from 'lucide-react';
+import { X, CheckCircle, User, Lock, Check } from 'lucide-react';
 import { VideoRequest, MajorCategory } from '../types';
 
 interface EditRequestModalProps {
@@ -19,6 +19,38 @@ const PRODUCER_OPTIONS = [
   { name: '외주', activeBg: 'bg-[#181715] text-[#EAE2D3] border-[#181715]' },
 ] as const;
 
+const parseSubCategoriesWithCount = (
+  raw: string | undefined
+): { names: string[]; compCountInput: string } => {
+  if (!raw) return { names: [], compCountInput: '' };
+  let compCountInput = '';
+  const names = raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((token) => {
+      const match = token.match(/^구성 추가\((\d+)개\)$/);
+      if (match) {
+        const count = parseInt(match[1], 10);
+        if (!isNaN(count) && count > 1) {
+          compCountInput = String(count);
+        }
+        return '구성 추가';
+      }
+      return token;
+    });
+  return { names, compCountInput };
+};
+
+const stripParens = (val: string | undefined, fallback: string): string => {
+  if (!val) return fallback;
+  const cleaned = val.replace(/\s*\([^)]*\)/g, '').trim();
+  return cleaned || val;
+};
+
+const STANDARD_ASPECT_RATIOS = ['16:9 가로형', '9:16 세로형', '1:1 정방형', '다중 포맷'];
+const STANDARD_TARGET_LENGTHS = ['15초~30초', '30초~60초', '60초~90초', '2분~3분', '5분 이상'];
+
 export const EditRequestModal: React.FC<EditRequestModalProps> = ({
   request,
   categories,
@@ -27,33 +59,68 @@ export const EditRequestModal: React.FC<EditRequestModalProps> = ({
   onClose,
   onSave,
 }) => {
+  const initialParsedSubs = parseSubCategoriesWithCount(request?.subCategory);
   const [headquarters, setHeadquarters] = useState<string>(request?.headquarters || '');
   const [team, setTeam] = useState<string>(request?.team || '');
   const [requesterName, setRequesterName] = useState<string>(request?.requesterName || '');
   const [majorCategory, setMajorCategory] = useState<string>(request?.majorCategory || '');
-  const [subCategory, setSubCategory] = useState<string>(request?.subCategory || '');
+  const [selectedSubCategories, setSelectedSubCategories] = useState<string[]>(
+    initialParsedSubs.names
+  );
+  const [addCompCountInput, setAddCompCountInput] = useState<string>(
+    initialParsedSubs.compCountInput
+  );
   const [taskName, setTaskName] = useState<string>(request?.taskName || '');
   const [requiredDays, setRequiredDays] = useState<number>(Math.round(request?.requiredDays || 1));
   const [dueDate, setDueDate] = useState<string>(request?.dueDate || '');
-  const [aspectRatio, setAspectRatio] = useState<string>(request?.aspectRatio || '16:9 가로형 (유튜브/웹)');
-  const [targetLength, setTargetLength] = useState<string>(request?.targetLength || '60초~90초');
+  const [aspectRatio, setAspectRatio] = useState<string>(
+    stripParens(request?.aspectRatio, '16:9 가로형')
+  );
+  const [targetLength, setTargetLength] = useState<string>(
+    stripParens(request?.targetLength, '60초~90초')
+  );
   const [notes, setNotes] = useState<string>(request?.notes || '');
   const [assignedProducer, setAssignedProducer] = useState<string>(request?.assignedProducer || '');
   const [newPassword, setNewPassword] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string>('');
 
+  const isAddComposition = (name: string) => name === '구성 추가';
+  const getEffectiveAddCompCount = (raw: string): number => {
+    const parsed = parseInt(raw, 10);
+    return !isNaN(parsed) && parsed > 0 ? Math.min(99, parsed) : 1;
+  };
+  const effectiveAddCompCount = getEffectiveAddCompCount(addCompCountInput);
+
+  const calcTotalRequiredDays = (
+    majorObj: MajorCategory | undefined,
+    selectedNames: string[],
+    compCount: number
+  ): number => {
+    if (!majorObj) return 0;
+    return Math.round(
+      majorObj.subcategories
+        .filter((s) => selectedNames.includes(s.name))
+        .reduce((sum, s) => {
+          const qty = isAddComposition(s.name) ? compCount : 1;
+          return sum + (Number(s.defaultDays) || 0) * qty;
+        }, 0)
+    );
+  };
+
   useEffect(() => {
     if (request) {
+      const parsedSubs = parseSubCategoriesWithCount(request.subCategory);
       setHeadquarters(request.headquarters);
       setTeam(request.team);
       setRequesterName(request.requesterName);
       setMajorCategory(request.majorCategory);
-      setSubCategory(request.subCategory);
+      setSelectedSubCategories(parsedSubs.names);
+      setAddCompCountInput(parsedSubs.compCountInput);
       setTaskName(request.taskName);
       setRequiredDays(Math.round(request.requiredDays));
       setDueDate(request.dueDate);
-      setAspectRatio(request.aspectRatio || '16:9 가로형 (유튜브/웹)');
-      setTargetLength(request.targetLength || '60초~90초');
+      setAspectRatio(stripParens(request.aspectRatio, '16:9 가로형'));
+      setTargetLength(stripParens(request.targetLength, '60초~90초'));
       setNotes(request.notes || '');
       setAssignedProducer(request.assignedProducer || '');
       setNewPassword('');
@@ -67,21 +134,52 @@ export const EditRequestModal: React.FC<EditRequestModalProps> = ({
 
   const handleMajorCategoryChange = (newMajor: string) => {
     setMajorCategory(newMajor);
+    setAddCompCountInput('');
     const majorObj = categories.find((c) => c.name === newMajor);
     if (majorObj && majorObj.subcategories.length > 0) {
       const firstSub = majorObj.subcategories[0];
-      setSubCategory(firstSub.name);
-      if (!isAdmin) {
-        setRequiredDays(Math.round(firstSub.defaultDays));
-      }
+      setSelectedSubCategories([firstSub.name]);
+      setRequiredDays(Math.round(firstSub.defaultDays));
+    } else {
+      setSelectedSubCategories([]);
     }
   };
 
-  const handleSubCategoryChange = (newSub: string) => {
-    setSubCategory(newSub);
-    const subObj = currentMajorObj?.subcategories.find((s) => s.name === newSub);
-    if (subObj && !isAdmin) {
-      setRequiredDays(Math.round(subObj.defaultDays));
+  const handleToggleSubCategory = (subName: string) => {
+    if (!currentMajorObj) return;
+    const isAlreadySelected = selectedSubCategories.includes(subName);
+    const nextRaw = isAlreadySelected
+      ? selectedSubCategories.filter((name) => name !== subName)
+      : [...selectedSubCategories, subName];
+
+    if (isAlreadySelected && isAddComposition(subName)) {
+      setAddCompCountInput('');
+    }
+
+    const nextOrdered = currentMajorObj.subcategories
+      .filter((s) => nextRaw.includes(s.name))
+      .map((s) => s.name);
+
+    const nextCompCount =
+      isAlreadySelected && isAddComposition(subName) ? 1 : effectiveAddCompCount;
+
+    const totalDays = calcTotalRequiredDays(currentMajorObj, nextOrdered, nextCompCount);
+
+    setSelectedSubCategories(nextOrdered);
+    if (nextOrdered.length > 0) {
+      setRequiredDays(totalDays);
+    } else if (!isAdmin) {
+      setRequiredDays(0);
+    }
+  };
+
+  const handleAddCompCountChange = (rawValue: string) => {
+    const digitsOnly = rawValue.replace(/[^\d]/g, '');
+    setAddCompCountInput(digitsOnly);
+    const nextCount = getEffectiveAddCompCount(digitsOnly);
+    const totalDays = calcTotalRequiredDays(currentMajorObj, selectedSubCategories, nextCount);
+    if (selectedSubCategories.length > 0) {
+      setRequiredDays(totalDays);
     }
   };
 
@@ -105,6 +203,10 @@ export const EditRequestModal: React.FC<EditRequestModalProps> = ({
       setErrorMsg('업무명을 입력해 주세요.');
       return;
     }
+    if (selectedSubCategories.length === 0) {
+      setErrorMsg('소분류를 1개 이상 선택해 주세요.');
+      return;
+    }
     if (requiredDays <= 0) {
       setErrorMsg('업무 소요일은 1일 이상이어야 합니다.');
       return;
@@ -114,13 +216,19 @@ export const EditRequestModal: React.FC<EditRequestModalProps> = ({
       return;
     }
 
+    const formattedSubCategories = selectedSubCategories.map((name) =>
+      isAddComposition(name) && effectiveAddCompCount > 1
+        ? `${name}(${effectiveAddCompCount}개)`
+        : name
+    );
+
     const updatedRequest: VideoRequest = {
       ...request,
       headquarters: headquarters.trim(),
       team: team.trim(),
       requesterName: requesterName.trim(),
       majorCategory,
-      subCategory,
+      subCategory: formattedSubCategories.join(', ').slice(0, 100),
       taskName: taskName.trim(),
       requiredDays: Math.round(requiredDays),
       dueDate,
@@ -240,65 +348,132 @@ export const EditRequestModal: React.FC<EditRequestModalProps> = ({
                 <span className="font-mono text-[11px] text-[#E94B22]">02 /</span>
                 <span>영상 분류 및 소요일</span>
               </span>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-[11px] font-semibold text-[#5F5A52] mb-1">
-                    대분류 *
-                  </label>
-                  <select
-                    value={majorCategory}
-                    onChange={(e) => handleMajorCategoryChange(e.target.value)}
-                    className={`${inputClass} cursor-pointer`}
-                  >
-                    {categories.map((c) => (
-                      <option key={c.id} value={c.name}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#5F5A52] mb-1">
+                      대분류 *
+                    </label>
+                    <select
+                      value={majorCategory}
+                      onChange={(e) => handleMajorCategoryChange(e.target.value)}
+                      className={`${inputClass} cursor-pointer`}
+                    >
+                      {categories.map((c) => (
+                        <option key={c.id} value={c.name}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#5F5A52] mb-1">
+                      업무 소요일 (일){' '}
+                      {isAdmin && <span className="text-[#E94B22] font-bold">(직접 변경)</span>}
+                    </label>
+                    {isAdmin ? (
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="number"
+                          min="1"
+                          max="60"
+                          step="1"
+                          value={requiredDays}
+                          onChange={(e) =>
+                            setRequiredDays(Math.max(1, Math.round(Number(e.target.value) || 1)))
+                          }
+                          className="w-full text-xs font-mono font-bold rounded-[3px] border border-[#E94B22]/60 bg-[#FCF9F3] p-2 focus:border-[#181715] focus:outline-none text-[#181715]"
+                          required
+                        />
+                        <span className="text-xs text-[#5F5A52] shrink-0">일</span>
+                      </div>
+                    ) : (
+                      <div className="p-2 bg-[#EAE2D3] rounded-[3px] border border-[#181715]/15 text-xs font-mono font-bold text-[#181715]">
+                        {Math.round(requiredDays)}일 소요
+                      </div>
+                    )}
+                  </div>
                 </div>
+
                 <div>
-                  <label className="block text-[11px] font-semibold text-[#5F5A52] mb-1">
-                    소분류 *
-                  </label>
-                  <select
-                    value={subCategory}
-                    onChange={(e) => handleSubCategoryChange(e.target.value)}
-                    className={`${inputClass} cursor-pointer`}
-                  >
-                    {currentMajorObj?.subcategories.map((s) => (
-                      <option key={s.id} value={s.name}>
-                        {s.name} ({Math.round(s.defaultDays)}일)
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[11px] font-semibold text-[#5F5A52] mb-1">
-                    업무 소요일 (일){' '}
-                    {isAdmin && <span className="text-[#E94B22] font-bold">(직접 변경)</span>}
-                  </label>
-                  {isAdmin ? (
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="number"
-                        min="1"
-                        max="60"
-                        step="1"
-                        value={requiredDays}
-                        onChange={(e) =>
-                          setRequiredDays(Math.max(1, Math.round(Number(e.target.value) || 1)))
-                        }
-                        className="w-full text-xs font-mono font-bold rounded-[3px] border border-[#E94B22]/60 bg-[#FCF9F3] p-2 focus:border-[#181715] focus:outline-none text-[#181715]"
-                        required
-                      />
-                      <span className="text-xs text-[#5F5A52] shrink-0">일</span>
-                    </div>
-                  ) : (
-                    <div className="p-2 bg-[#EAE2D3] rounded-[3px] border border-[#181715]/15 text-xs font-mono font-bold text-[#181715]">
-                      {Math.round(requiredDays)}일 소요
-                    </div>
-                  )}
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[11px] font-semibold text-[#5F5A52]">
+                      소분류 (같은 대분류 내 복수 선택 가능) *
+                    </label>
+                    <span className="font-mono text-[10px] font-bold text-[#181715]">
+                      {selectedSubCategories.length}개 선택됨
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                    {currentMajorObj?.subcategories.map((s) => {
+                      const isChecked = selectedSubCategories.includes(s.name);
+                      const isCompItem = isAddComposition(s.name);
+                      const subQty = isChecked && isCompItem ? effectiveAddCompCount : 1;
+                      const subTotalDays = Math.round((Number(s.defaultDays) || 0) * subQty);
+
+                      return (
+                        <div
+                          key={s.id}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => handleToggleSubCategory(s.name)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              handleToggleSubCategory(s.name);
+                            }
+                          }}
+                          aria-pressed={isChecked}
+                          className={`text-left px-2.5 py-2 rounded-[3px] border transition-colors cursor-pointer ${
+                            isChecked
+                              ? 'bg-[#EFE8DA] border-[#181715] text-[#181715]'
+                              : 'bg-[#FCF9F3] border-[#181715]/20 text-[#181715] hover:bg-[#EFE8DA]/55'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="flex items-center gap-2 min-w-0">
+                              <span
+                                className={`w-3.5 h-3.5 rounded-[2px] border flex items-center justify-center shrink-0 ${
+                                  isChecked
+                                    ? 'bg-[#181715] border-[#181715] text-[#EAE2D3]'
+                                    : 'bg-white border-[#181715]/30'
+                                }`}
+                              >
+                                {isChecked && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                              </span>
+                              <span className="text-xs font-semibold truncate">{s.name}</span>
+                            </span>
+                            <span className="font-mono text-[11px] font-bold text-[#E94B22] shrink-0">
+                              {subTotalDays}일
+                            </span>
+                          </div>
+                          {isChecked && isCompItem && (
+                            <div
+                              className="mt-2 pt-1.5 border-t border-[#181715]/12 flex items-center justify-between gap-2"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <span className="text-[10px] font-semibold text-[#5F5A52]">
+                                개수 (미입력 시 1개)
+                              </span>
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={99}
+                                  step={1}
+                                  placeholder="1"
+                                  value={addCompCountInput}
+                                  onChange={(e) => handleAddCompCountChange(e.target.value)}
+                                  className="w-12 text-center font-mono text-[11px] font-bold rounded-[2px] border border-[#181715]/30 bg-white px-1 py-0.5 text-[#181715] focus:border-[#181715] focus:outline-none"
+                                />
+                                <span className="text-[10px] font-semibold text-[#181715]">개</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             </div>
@@ -348,10 +523,13 @@ export const EditRequestModal: React.FC<EditRequestModalProps> = ({
                   onChange={(e) => setAspectRatio(e.target.value)}
                   className={`${inputClass} cursor-pointer`}
                 >
-                  <option value="16:9 가로형 (유튜브/웹)">16:9 가로형 (유튜브 / 공식 웹사이트 / 행사)</option>
-                  <option value="9:16 세로형 (인스타 릴스/유튜브 쇼츠)">9:16 세로형 (인스타 릴스 / 유튜브 쇼츠)</option>
-                  <option value="1:1 정방형 (피드/카드뉴스)">1:1 정방형 (인스타그램 피드 / 온라인 카드뉴스)</option>
-                  <option value="다중 포맷 (16:9 + 9:16 동시 납품)">다중 포맷 (16:9 메인 + 9:16 숏폼)</option>
+                  {!STANDARD_ASPECT_RATIOS.includes(aspectRatio) && aspectRatio && (
+                    <option value={aspectRatio}>{aspectRatio}</option>
+                  )}
+                  <option value="16:9 가로형">16:9 가로형</option>
+                  <option value="9:16 세로형">9:16 세로형</option>
+                  <option value="1:1 정방형">1:1 정방형</option>
+                  <option value="다중 포맷">다중 포맷</option>
                 </select>
               </div>
               <div>
@@ -363,11 +541,14 @@ export const EditRequestModal: React.FC<EditRequestModalProps> = ({
                   onChange={(e) => setTargetLength(e.target.value)}
                   className={`${inputClass} cursor-pointer`}
                 >
-                  <option value="15초~30초 (티저/스낵)">15초~30초 (티저 / 스낵 숏폼)</option>
-                  <option value="30초~60초 (표준 숏폼)">30초~60초 (표준 숏폼)</option>
-                  <option value="60초~90초 (캠페인)">60초~90초 (캠페인 홍보)</option>
-                  <option value="2분~3분 (소개/인터뷰)">2분~3분 (사업소개 / 인터뷰)</option>
-                  <option value="5분 이상 (다큐/강의)">5분 이상 (다큐멘터리 / 행사 풀영상)</option>
+                  {!STANDARD_TARGET_LENGTHS.includes(targetLength) && targetLength && (
+                    <option value={targetLength}>{targetLength}</option>
+                  )}
+                  <option value="15초~30초">15초~30초</option>
+                  <option value="30초~60초">30초~60초</option>
+                  <option value="60초~90초">60초~90초</option>
+                  <option value="2분~3분">2분~3분</option>
+                  <option value="5분 이상">5분 이상</option>
                 </select>
               </div>
             </div>

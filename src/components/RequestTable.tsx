@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Search,
   Download,
@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { VideoRequest, MajorCategory } from '../types';
 import { EditRequestModal } from './EditRequestModal';
-import { sortRequestsByRegistrationOrder } from '../utils/storage';
+import { sortRequestsByRegistrationOrder, maskKeepEdges } from '../utils/storage';
 
 interface RequestTableProps {
   requests: VideoRequest[];
@@ -41,6 +41,15 @@ const getProducerBadgeStyle = (producer: string) => {
   }
 };
 
+const getProducerDotColor = (producer: string) => {
+  if (producer.includes('신혜')) return 'bg-[#4F8A6B]';
+  if (producer.includes('민규')) return 'bg-[#5A92BF]';
+  if (producer.includes('유진')) return 'bg-[#D87AC6]';
+  if (producer.includes('승아')) return 'bg-[#A39B53]';
+  if (producer.includes('외주')) return 'bg-[#181715]';
+  return 'bg-[#8A8275]';
+};
+
 export const RequestTable: React.FC<RequestTableProps> = ({
   requests,
   categories,
@@ -63,10 +72,20 @@ export const RequestTable: React.FC<RequestTableProps> = ({
   const [passwordInput, setPasswordInput] = useState<string>('');
   const [passwordError, setPasswordError] = useState<string>('');
 
+  const [noPasswordNoticeRequest, setNoPasswordNoticeRequest] = useState<VideoRequest | null>(null);
+
+  const formatDisplayText = (value: string) => (isAdmin ? value : maskKeepEdges(value));
+
   const uniqueHqs = useMemo(() => {
-    const set = new Set(requests.map((r) => r.headquarters));
-    return Array.from(set);
-  }, [requests]);
+    const set = new Set(requests.map((r) => (isAdmin ? r.headquarters : maskKeepEdges(r.headquarters))));
+    return Array.from(set).filter(Boolean);
+  }, [requests, isAdmin]);
+
+  useEffect(() => {
+    if (selectedHq !== 'all' && !uniqueHqs.includes(selectedHq)) {
+      setSelectedHq('all');
+    }
+  }, [uniqueHqs, selectedHq]);
 
   const normalCount = requests.filter((r) => !r.isOverCapacity).length;
   const overCount = requests.filter((r) => r.isOverCapacity).length;
@@ -75,15 +94,18 @@ export const RequestTable: React.FC<RequestTableProps> = ({
     const list = requests.filter((r) => {
       if (filterType === 'normal' && r.isOverCapacity) return false;
       if (filterType === 'over' && !r.isOverCapacity) return false;
-      if (selectedHq !== 'all' && r.headquarters !== selectedHq) return false;
+      const hqDisplay = isAdmin ? r.headquarters : maskKeepEdges(r.headquarters);
+      if (selectedHq !== 'all' && hqDisplay !== selectedHq) return false;
       if (selectedCategory !== 'all' && r.majorCategory !== selectedCategory) return false;
 
       if (searchTerm.trim()) {
         const term = searchTerm.toLowerCase();
         const matchTitle = r.taskName.toLowerCase().includes(term);
-        const matchRequester = r.requesterName.toLowerCase().includes(term);
-        const matchTeam = r.team.toLowerCase().includes(term);
-        const matchHq = r.headquarters.toLowerCase().includes(term);
+        const requesterDisplay = isAdmin ? r.requesterName : maskKeepEdges(r.requesterName);
+        const teamDisplay = isAdmin ? r.team : maskKeepEdges(r.team);
+        const matchRequester = requesterDisplay.toLowerCase().includes(term);
+        const matchTeam = teamDisplay.toLowerCase().includes(term);
+        const matchHq = hqDisplay.toLowerCase().includes(term);
         const matchSub = r.subCategory.toLowerCase().includes(term);
         return matchTitle || matchRequester || matchTeam || matchHq || matchSub;
       }
@@ -92,7 +114,7 @@ export const RequestTable: React.FC<RequestTableProps> = ({
     });
 
     return sortRequestsByRegistrationOrder(list, sortOrder);
-  }, [requests, filterType, selectedHq, selectedCategory, searchTerm, sortOrder]);
+  }, [requests, filterType, selectedHq, selectedCategory, searchTerm, sortOrder, isAdmin]);
 
   const handleOpenEdit = (req: VideoRequest) => {
     if (isAdmin) {
@@ -102,7 +124,7 @@ export const RequestTable: React.FC<RequestTableProps> = ({
       setPasswordInput('');
       setPasswordError('');
     } else {
-      setEditingRequest(req);
+      setNoPasswordNoticeRequest(req);
     }
   };
 
@@ -364,15 +386,23 @@ export const RequestTable: React.FC<RequestTableProps> = ({
                             <span>초과 접수</span>
                           </span>
                         )}
-                        {req.assignedProducer && (
-                          <span
-                            className={`text-[10px] font-bold px-1.5 py-0.5 rounded-[2px] border ${getProducerBadgeStyle(
-                              req.assignedProducer
-                            )}`}
-                          >
-                            담당: {req.assignedProducer}
-                          </span>
-                        )}
+                        {req.assignedProducer &&
+                          (isAdmin ? (
+                            <span
+                              className={`text-[10px] font-bold px-1.5 py-0.5 rounded-[2px] border ${getProducerBadgeStyle(
+                                req.assignedProducer
+                              )}`}
+                            >
+                              담당: {req.assignedProducer}
+                            </span>
+                          ) : (
+                            <span
+                              className={`inline-block w-2.5 h-2.5 rounded-full shrink-0 border border-[#181715]/20 ${getProducerDotColor(
+                                req.assignedProducer
+                              )}`}
+                              aria-label="제작 담당자 배정됨"
+                            />
+                          ))}
                       </div>
                       <div className="text-[11px] text-[#5F5A52] mt-1 flex flex-wrap items-center gap-2">
                         {req.aspectRatio && <span>{req.aspectRatio}</span>}
@@ -387,9 +417,14 @@ export const RequestTable: React.FC<RequestTableProps> = ({
 
                     {/* 3. Division / Team / Requester */}
                     <td className="py-3.5 px-4 align-top whitespace-nowrap">
-                      <div className="font-bold text-[#181715]">{req.headquarters}</div>
+                      <div className="font-bold text-[#181715]">
+                        {formatDisplayText(req.headquarters)}
+                      </div>
                       <div className="text-[11px] text-[#5F5A52] mt-0.5">
-                        {req.team} · <strong className="text-[#181715]">{req.requesterName}</strong>
+                        {formatDisplayText(req.team)} ·{' '}
+                        <strong className="text-[#181715]">
+                          {formatDisplayText(req.requesterName)}
+                        </strong>
                       </div>
                     </td>
 
@@ -609,10 +644,14 @@ export const RequestTable: React.FC<RequestTableProps> = ({
                 <div>
                   <span className="text-[#5F5A52] text-[11px] block">의뢰 부서 및 담당자</span>
                   <div className="font-bold text-[#181715] mt-0.5">
-                    {selectedRequest.headquarters} · {selectedRequest.team}
+                    {formatDisplayText(selectedRequest.headquarters)} ·{' '}
+                    {formatDisplayText(selectedRequest.team)}
                   </div>
                   <div className="text-[#5F5A52] mt-0.5">
-                    담당자: <strong className="text-[#181715]">{selectedRequest.requesterName}</strong>
+                    담당자:{' '}
+                    <strong className="text-[#181715]">
+                      {formatDisplayText(selectedRequest.requesterName)}
+                    </strong>
                   </div>
                 </div>
 
@@ -657,13 +696,22 @@ export const RequestTable: React.FC<RequestTableProps> = ({
                   <span className="text-[#5F5A52] text-[10px] block">제작 담당자 배정</span>
                   <div className="mt-1">
                     {selectedRequest.assignedProducer ? (
-                      <span
-                        className={`text-xs font-bold px-2 py-0.5 rounded-[2px] border inline-block ${getProducerBadgeStyle(
-                          selectedRequest.assignedProducer
-                        )}`}
-                      >
-                        ✓ {selectedRequest.assignedProducer} 담당
-                      </span>
+                      isAdmin ? (
+                        <span
+                          className={`text-xs font-bold px-2 py-0.5 rounded-[2px] border inline-block ${getProducerBadgeStyle(
+                            selectedRequest.assignedProducer
+                          )}`}
+                        >
+                          ✓ {selectedRequest.assignedProducer} 담당
+                        </span>
+                      ) : (
+                        <span
+                          className={`inline-block w-3 h-3 rounded-full border border-[#181715]/20 ${getProducerDotColor(
+                            selectedRequest.assignedProducer
+                          )}`}
+                          aria-label="제작 담당자 배정됨"
+                        />
+                      )
                     ) : (
                       <span className="text-[#5F5A52] text-xs">미배정 (일정표에서 지정 가능)</span>
                     )}
@@ -781,6 +829,38 @@ export const RequestTable: React.FC<RequestTableProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Passwordless Request Notice Modal (Non-admin) */}
+      {noPasswordNoticeRequest && (
+        <div
+          className="fixed inset-0 z-[100] bg-[#181715]/65 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setNoPasswordNoticeRequest(null)}
+        >
+          <div
+            className="bg-[#F5F0E6] rounded-[4px] shadow-[0_24px_60px_rgba(24,23,21,0.3)] max-w-sm w-full p-5 border border-[#181715]/25 space-y-4 text-[#181715]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2">
+              <Lock className="w-4 h-4 text-[#181715] shrink-0" />
+              <h3 className="text-sm font-extrabold">수정 권한 안내</h3>
+            </div>
+
+            <p className="text-xs text-[#5F5A52] leading-relaxed">
+              <strong className="text-[#181715]">'{noPasswordNoticeRequest.taskName}'</strong> 접수 건은 작성자 비밀번호가 설정되지 않아 일반 모드에서는 수정할 수 없습니다. 관리자 모드에서 수정해 주세요.
+            </p>
+
+            <div className="flex items-center justify-end pt-2 border-t border-[#181715]/12">
+              <button
+                type="button"
+                onClick={() => setNoPasswordNoticeRequest(null)}
+                className="px-4 py-1.5 text-xs font-bold text-[#EAE2D3] bg-[#181715] hover:bg-[#E94B22] hover:text-white rounded-[3px] transition-colors cursor-pointer"
+              >
+                확인
+              </button>
+            </div>
           </div>
         </div>
       )}

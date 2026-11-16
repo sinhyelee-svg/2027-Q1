@@ -347,16 +347,6 @@ export const AdminCalendarPlanner: React.FC<AdminCalendarPlannerProps> = ({
               {PRODUCER_LIST.map((name) => {
                 const pTheme = PRODUCER_THEMES[name];
                 const isSelected = selectedProducerFilter === name;
-                const shortColor =
-                  name === '민규'
-                    ? '파랑'
-                    : name === '신혜'
-                    ? '초록'
-                    : name === '유진'
-                    ? '보라'
-                    : name === '승아'
-                    ? '주황'
-                    : '차콜';
 
                 return (
                   <button
@@ -368,9 +358,7 @@ export const AdminCalendarPlanner: React.FC<AdminCalendarPlannerProps> = ({
                     }`}
                   >
                     <span className={`w-2 h-2 rounded-[1px] ${pTheme.dotColor} shrink-0`} />
-                    <span>
-                      {name} ({shortColor})
-                    </span>
+                    <span>{name}</span>
                     <span className="font-mono text-[11px] opacity-80">
                       {producerStats[name].assigned}/{producerStats[name].total}
                     </span>
@@ -582,7 +570,7 @@ export const AdminCalendarPlanner: React.FC<AdminCalendarPlannerProps> = ({
                                 className={`px-1.5 py-0.5 rounded-[2px] text-[10px] border transition-colors cursor-pointer flex items-center gap-0.5 ${
                                   isSelected ? pTheme.activeButtonClass : pTheme.buttonClass
                                 }`}
-                                title={`${name} (${pTheme.colorName}) 담당자로 지정`}
+                                title={`${name} 담당자로 지정`}
                               >
                                 {isSelected ? '✓ ' : ''}
                                 <span>{name}</span>
@@ -878,12 +866,15 @@ export const AdminCalendarPlanner: React.FC<AdminCalendarPlannerProps> = ({
                         key={name}
                         type="button"
                         onClick={() => setQuickAssignProducer(isSelected ? '' : name)}
-                        className={`px-2 py-1 rounded-[2px] text-xs border transition-colors cursor-pointer ${
+                        className={`px-2 py-1 rounded-[2px] text-xs border transition-colors cursor-pointer inline-flex items-center gap-1.5 ${
                           isSelected ? pTheme.activeButtonClass : pTheme.buttonClass
                         }`}
                       >
-                        {isSelected && '✓ '}
-                        {name} ({pTheme.colorName})
+                        <span className={`w-2 h-2 rounded-[1px] ${pTheme.dotColor} shrink-0`} />
+                        <span>
+                          {isSelected && '✓ '}
+                          {name}
+                        </span>
                       </button>
                     );
                   })}

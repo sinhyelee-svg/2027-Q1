@@ -267,15 +267,33 @@ export function reconcileOverCapacityRequests(
 }
 
 /**
+ * Masks a string by keeping only the first and last characters visible.
+ * Used in non-admin mode to de-identify headquarters, team, and requester names.
+ */
+export function maskKeepEdges(value: string): string {
+  const trimmed = (value || '').trim();
+  if (!trimmed) return '';
+  const chars = Array.from(trimmed);
+  if (chars.length <= 1) return chars[0];
+  if (chars.length === 2) return `${chars[0]}*`;
+  return `${chars[0]}${'*'.repeat(chars.length - 2)}${chars[chars.length - 1]}`;
+}
+
+/**
  * Export requests to CSV with UTF-8 BOM
  */
-export function exportRequestsToCSV(requests: VideoRequest[], quarterName: string): void {
+export function exportRequestsToCSV(
+  requests: VideoRequest[],
+  quarterName: string,
+  isAdmin: boolean = false
+): void {
   const headers = [
     '접수ID',
     '분기',
     '본부',
     '팀',
     '담당자',
+    '연락처',
     '대분류',
     '소분류',
     '업무명',
@@ -288,24 +306,31 @@ export function exportRequestsToCSV(requests: VideoRequest[], quarterName: strin
     '상세요청내용'
   ];
 
-  const rows = requests.map((r) => [
-    r.id,
-    r.quarter,
-    `"${r.headquarters.replace(/"/g, '""')}"`,
-    `"${r.team.replace(/"/g, '""')}"`,
-    `"${r.requesterName.replace(/"/g, '""')}"`,
-    `"${(r.requesterContact || '').replace(/"/g, '""')}"`,
-    `"${r.majorCategory.replace(/"/g, '""')}"`,
-    `"${r.subCategory.replace(/"/g, '""')}"`,
-    `"${r.taskName.replace(/"/g, '""')}"`,
-    r.requiredDays,
-    r.dueDate,
-    `"${(r.aspectRatio || '').replace(/"/g, '""')}"`,
-    r.isOverCapacity ? '초과접수' : '정상접수',
-    r.status,
-    new Date(r.createdAt).toLocaleString('ko-KR'),
-    `"${(r.notes || '').replace(/"/g, '""').replace(/\n/g, ' ')}"`
-  ]);
+  const rows = requests.map((r) => {
+    const hq = isAdmin ? r.headquarters : maskKeepEdges(r.headquarters);
+    const team = isAdmin ? r.team : maskKeepEdges(r.team);
+    const requester = isAdmin ? r.requesterName : maskKeepEdges(r.requesterName);
+    const contact = isAdmin ? r.requesterContact || '' : '';
+
+    return [
+      r.id,
+      r.quarter,
+      `"${hq.replace(/"/g, '""')}"`,
+      `"${team.replace(/"/g, '""')}"`,
+      `"${requester.replace(/"/g, '""')}"`,
+      `"${contact.replace(/"/g, '""')}"`,
+      `"${r.majorCategory.replace(/"/g, '""')}"`,
+      `"${r.subCategory.replace(/"/g, '""')}"`,
+      `"${r.taskName.replace(/"/g, '""')}"`,
+      r.requiredDays,
+      r.dueDate,
+      `"${(r.aspectRatio || '').replace(/"/g, '""')}"`,
+      r.isOverCapacity ? '초과접수' : '정상접수',
+      r.status,
+      new Date(r.createdAt).toLocaleString('ko-KR'),
+      `"${(r.notes || '').replace(/"/g, '""').replace(/\n/g, ' ')}"`
+    ];
+  });
 
   const csvContent = '\uFEFF' + [headers.join(','), ...rows.map((row) => row.join(','))].join('\r\n');
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });

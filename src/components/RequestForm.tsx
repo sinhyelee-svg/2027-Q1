@@ -10,6 +10,7 @@ import {
   HelpCircle,
   X,
   Lock,
+  Check,
 } from 'lucide-react';
 import { MajorCategory, VideoRequest, QuarterConfig } from '../types';
 
@@ -37,36 +38,85 @@ export const RequestForm: React.FC<RequestFormProps> = ({
   const [password, setPassword] = useState<string>('');
 
   const [majorCategory, setMajorCategory] = useState<string>(categories[0]?.name || '');
-  const [subCategory, setSubCategory] = useState<string>('');
+  const [selectedSubCategories, setSelectedSubCategories] = useState<string[]>([]);
+  const [addCompCountInput, setAddCompCountInput] = useState<string>('');
   const [taskName, setTaskName] = useState<string>('');
   const [requiredDays, setRequiredDays] = useState<number>(0);
   const [dueDate, setDueDate] = useState<string>('');
-  const [aspectRatio, setAspectRatio] = useState<string>('16:9 가로형 (유튜브/웹)');
+  const [aspectRatio, setAspectRatio] = useState<string>('16:9 가로형');
   const [targetLength, setTargetLength] = useState<string>('60초~90초');
   const [notes, setNotes] = useState<string>('');
 
   const [errorMsg, setErrorMsg] = useState<string>('');
 
+  const isAddComposition = (name: string) => name === '구성 추가';
+  const getEffectiveAddCompCount = (raw: string): number => {
+    const parsed = parseInt(raw, 10);
+    return !isNaN(parsed) && parsed > 0 ? Math.min(99, parsed) : 1;
+  };
+  const effectiveAddCompCount = getEffectiveAddCompCount(addCompCountInput);
+
+  const calcTotalRequiredDays = (
+    majorObj: MajorCategory | undefined,
+    selectedNames: string[],
+    compCount: number
+  ): number => {
+    if (!majorObj) return 0;
+    return Math.round(
+      majorObj.subcategories
+        .filter((s) => selectedNames.includes(s.name))
+        .reduce((sum, s) => {
+          const qty = isAddComposition(s.name) ? compCount : 1;
+          return sum + (Number(s.defaultDays) || 0) * qty;
+        }, 0)
+    );
+  };
+
   const currentMajorObj = categories.find((c) => c.name === majorCategory);
-  const currentSubObj = currentMajorObj?.subcategories.find((s) => s.name === subCategory);
+  const selectedSubObjs =
+    currentMajorObj?.subcategories.filter((s) => selectedSubCategories.includes(s.name)) || [];
 
   useEffect(() => {
     if (currentMajorObj && currentMajorObj.subcategories.length > 0) {
       const firstSub = currentMajorObj.subcategories[0];
-      setSubCategory(firstSub.name);
+      setSelectedSubCategories([firstSub.name]);
+      setAddCompCountInput('');
       setRequiredDays(Math.round(firstSub.defaultDays));
     } else {
-      setSubCategory('');
+      setSelectedSubCategories([]);
+      setAddCompCountInput('');
       setRequiredDays(0);
     }
   }, [majorCategory, currentMajorObj]);
 
-  const handleSubcategoryChange = (subName: string) => {
-    setSubCategory(subName);
-    const sub = currentMajorObj?.subcategories.find((s) => s.name === subName);
-    if (sub) {
-      setRequiredDays(Math.round(sub.defaultDays));
+  const handleToggleSubcategory = (subName: string) => {
+    if (!currentMajorObj) return;
+    const isAlreadySelected = selectedSubCategories.includes(subName);
+    const nextRaw = isAlreadySelected
+      ? selectedSubCategories.filter((name) => name !== subName)
+      : [...selectedSubCategories, subName];
+
+    if (isAlreadySelected && isAddComposition(subName)) {
+      setAddCompCountInput('');
     }
+
+    // Keep canonical order defined by the category list
+    const nextOrdered = currentMajorObj.subcategories
+      .filter((s) => nextRaw.includes(s.name))
+      .map((s) => s.name);
+
+    const nextCompCount =
+      isAlreadySelected && isAddComposition(subName) ? 1 : effectiveAddCompCount;
+
+    setSelectedSubCategories(nextOrdered);
+    setRequiredDays(calcTotalRequiredDays(currentMajorObj, nextOrdered, nextCompCount));
+  };
+
+  const handleAddCompCountChange = (rawValue: string) => {
+    const digitsOnly = rawValue.replace(/[^\d]/g, '');
+    setAddCompCountInput(digitsOnly);
+    const nextCount = getEffectiveAddCompCount(digitsOnly);
+    setRequiredDays(calcTotalRequiredDays(currentMajorObj, selectedSubCategories, nextCount));
   };
 
   const willExceedCapacity = remainingDays <= 0 || requiredDays > remainingDays;
@@ -93,8 +143,8 @@ export const RequestForm: React.FC<RequestFormProps> = ({
       setErrorMsg('추후 수정을 위한 비밀번호를 입력해 주세요.');
       return;
     }
-    if (!majorCategory || !subCategory) {
-      setErrorMsg('대분류 및 소분류를 선택해 주세요.');
+    if (!majorCategory || selectedSubCategories.length === 0) {
+      setErrorMsg('대분류 및 소분류를 1개 이상 선택해 주세요.');
       return;
     }
     if (!taskName.trim()) {
@@ -110,6 +160,12 @@ export const RequestForm: React.FC<RequestFormProps> = ({
       return;
     }
 
+    const formattedSubCategories = selectedSubCategories.map((name) =>
+      isAddComposition(name) && effectiveAddCompCount > 1
+        ? `${name}(${effectiveAddCompCount}개)`
+        : name
+    );
+
     onSubmit({
       quarter: currentQuarter.id,
       headquarters: headquarters.trim(),
@@ -117,7 +173,7 @@ export const RequestForm: React.FC<RequestFormProps> = ({
       requesterName: requesterName.trim(),
       password: password.trim(),
       majorCategory,
-      subCategory,
+      subCategory: formattedSubCategories.join(', ').slice(0, 100),
       taskName: taskName.trim(),
       requiredDays: Math.round(requiredDays),
       dueDate,
@@ -299,7 +355,7 @@ export const RequestForm: React.FC<RequestFormProps> = ({
               </span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-4">
               <div>
                 <label className="block text-[11px] font-semibold text-[#5F5A52] mb-1">
                   영상 대분류 <span className="text-[#E94B22]">*</span>
@@ -321,27 +377,93 @@ export const RequestForm: React.FC<RequestFormProps> = ({
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-[#5F5A52] mb-1">
-                  영상 소분류 (표준 업무 규격) <span className="text-[#E94B22]">*</span>
-                </label>
-                <select
-                  value={subCategory}
-                  onChange={(e) => handleSubcategoryChange(e.target.value)}
-                  className={`${inputClass} font-semibold cursor-pointer`}
-                >
-                  {currentMajorObj?.subcategories.map((sub) => (
-                    <option key={sub.id} value={sub.name}>
-                      {sub.name} (표준 {Math.round(sub.defaultDays)}일 소요)
-                    </option>
-                  ))}
-                </select>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-[11px] font-semibold text-[#5F5A52]">
+                    영상 소분류 (같은 대분류 내 복수 선택 가능){' '}
+                    <span className="text-[#E94B22]">*</span>
+                  </label>
+                  <span className="font-mono text-[11px] font-bold text-[#181715]">
+                    {selectedSubObjs.length}개 선택됨
+                  </span>
+                </div>
 
-                {currentSubObj && (
-                  <div className="text-[11px] text-[#5F5A52] mt-1.5 p-2 bg-[#EAE2D3]/60 rounded-[3px] border border-[#181715]/12">
-                    <span className="font-bold text-[#181715]">작업 범위: </span>
-                    <span>{currentSubObj.description}</span>
-                  </div>
-                )}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {currentMajorObj?.subcategories.map((sub) => {
+                    const isChecked = selectedSubCategories.includes(sub.name);
+                    const isCompItem = isAddComposition(sub.name);
+                    const subQty = isChecked && isCompItem ? effectiveAddCompCount : 1;
+                    const subTotalDays = Math.round((Number(sub.defaultDays) || 0) * subQty);
+
+                    return (
+                      <div
+                        key={sub.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => handleToggleSubcategory(sub.name)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            handleToggleSubcategory(sub.name);
+                          }
+                        }}
+                        aria-pressed={isChecked}
+                        className={`text-left p-2.5 rounded-[3px] border transition-colors cursor-pointer flex items-start gap-2.5 ${
+                          isChecked
+                            ? 'bg-[#EFE8DA] border-[#181715] text-[#181715]'
+                            : 'bg-[#FCF9F3] border-[#181715]/20 text-[#181715] hover:bg-[#EFE8DA]/55'
+                        }`}
+                      >
+                        <span
+                          className={`mt-0.5 w-4 h-4 rounded-[2px] border flex items-center justify-center shrink-0 transition-colors ${
+                            isChecked
+                              ? 'bg-[#181715] border-[#181715] text-[#EAE2D3]'
+                              : 'bg-white border-[#181715]/30'
+                          }`}
+                        >
+                          {isChecked && <Check className="w-3 h-3 stroke-[3]" />}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-bold leading-snug truncate">
+                              {sub.name}
+                            </span>
+                            <span className="font-mono text-[11px] font-extrabold text-[#E94B22] shrink-0 tabular-nums">
+                              +{subTotalDays}일
+                            </span>
+                          </div>
+                          {sub.description && (
+                            <p className="text-[10px] text-[#5F5A52] mt-0.5 line-clamp-2 leading-relaxed">
+                              {sub.description}
+                            </p>
+                          )}
+                          {isChecked && isCompItem && (
+                            <div
+                              className="mt-2 pt-2 border-t border-[#181715]/12 flex items-center justify-between gap-2"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <span className="text-[11px] font-semibold text-[#5F5A52]">
+                                개수 (미입력 시 1개)
+                              </span>
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={99}
+                                  step={1}
+                                  placeholder="1"
+                                  value={addCompCountInput}
+                                  onChange={(e) => handleAddCompCountChange(e.target.value)}
+                                  className="w-14 text-center font-mono text-xs font-bold rounded-[2px] border border-[#181715]/30 bg-white px-1.5 py-0.5 text-[#181715] focus:border-[#181715] focus:outline-none"
+                                />
+                                <span className="text-[11px] font-semibold text-[#181715]">개</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
@@ -353,18 +475,35 @@ export const RequestForm: React.FC<RequestFormProps> = ({
                     <Clock className="w-3.5 h-3.5 text-[#5A92BF] shrink-0" />
                     <span>산정된 업무 소요일</span>
                     <span className="text-[11px] font-normal text-[#5F5A52]">
-                      (대·소분류 기준표 자동 계산)
+                      (선택 항목 합산 자동 계산)
                     </span>
                   </div>
                   <div className="text-xs text-[#5F5A52] mt-1">
-                    제작 포맷:{' '}
-                    <strong className="text-[#181715]">
-                      {currentSubObj?.deliverables || '기본 규격'}
-                    </strong>
+                    {selectedSubObjs.length > 0 ? (
+                      <span>
+                        선택 항목:{' '}
+                        <strong className="text-[#181715]">
+                          {selectedSubObjs
+                            .map((s) => {
+                              const isCompItem = isAddComposition(s.name);
+                              const qty = isCompItem ? effectiveAddCompCount : 1;
+                              const days = Math.round((Number(s.defaultDays) || 0) * qty);
+                              return isCompItem && qty > 1
+                                ? `${s.name} ${qty}개(${days}일)`
+                                : `${s.name}(${days}일)`;
+                            })
+                            .join(' + ')}
+                        </strong>
+                      </span>
+                    ) : (
+                      <span className="text-[#E94B22] font-semibold">
+                        소분류를 1개 이상 선택해 주세요.
+                      </span>
+                    )}
                   </div>
                 </div>
 
-                <div className="flex items-baseline gap-1 px-3.5 py-1.5 rounded-[3px] bg-[#181715] text-[#EAE2D3] self-start sm:self-auto">
+                <div className="flex items-baseline gap-1 px-3.5 py-1.5 rounded-[3px] bg-[#181715] text-[#EAE2D3] self-start sm:self-auto shrink-0">
                   <span className="text-2xl font-extrabold font-mono tabular-nums">
                     {Math.round(requiredDays)}
                   </span>
@@ -421,10 +560,10 @@ export const RequestForm: React.FC<RequestFormProps> = ({
                   onChange={(e) => setAspectRatio(e.target.value)}
                   className={`${inputClass} cursor-pointer`}
                 >
-                  <option value="16:9 가로형 (유튜브/웹)">16:9 가로형 (유튜브 / 공식 웹사이트 / 행사)</option>
-                  <option value="9:16 세로형 (인스타 릴스/유튜브 쇼츠)">9:16 세로형 (인스타 릴스 / 유튜브 쇼츠)</option>
-                  <option value="1:1 정방형 (피드/카드뉴스)">1:1 정방형 (인스타그램 피드 / 온라인 카드뉴스)</option>
-                  <option value="다중 포맷 (16:9 + 9:16 동시 납품)">다중 포맷 (16:9 메인 + 9:16 숏폼)</option>
+                  <option value="16:9 가로형">16:9 가로형</option>
+                  <option value="9:16 세로형">9:16 세로형</option>
+                  <option value="1:1 정방형">1:1 정방형</option>
+                  <option value="다중 포맷">다중 포맷</option>
                 </select>
               </div>
 
@@ -437,11 +576,11 @@ export const RequestForm: React.FC<RequestFormProps> = ({
                   onChange={(e) => setTargetLength(e.target.value)}
                   className={`${inputClass} cursor-pointer`}
                 >
-                  <option value="15초~30초 (티저/스낵)">15초~30초 (티저 / 스낵 숏폼)</option>
-                  <option value="30초~60초 (표준 숏폼)">30초~60초 (표준 숏폼)</option>
-                  <option value="60초~90초 (캠페인)">60초~90초 (캠페인 홍보)</option>
-                  <option value="2분~3분 (소개/인터뷰)">2분~3분 (사업소개 / 인터뷰)</option>
-                  <option value="5분 이상 (다큐/강의)">5분 이상 (다큐멘터리 / 행사 풀영상)</option>
+                  <option value="15초~30초">15초~30초</option>
+                  <option value="30초~60초">30초~60초</option>
+                  <option value="60초~90초">60초~90초</option>
+                  <option value="2분~3분">2분~3분</option>
+                  <option value="5분 이상">5분 이상</option>
                 </select>
               </div>
             </div>

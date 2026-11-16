@@ -127,12 +127,26 @@ export default function App() {
     return sortRequestsByRegistrationOrder(list, 'asc');
   }, [requests, currentQuarterId]);
 
+  const toastTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
+
   // Toast helper
   const showToast = (text: string, type: 'success' | 'warning' | 'info' = 'success') => {
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+    }
     setToastMessage({ text, type });
-    setTimeout(() => {
+    toastTimerRef.current = window.setTimeout(() => {
       setToastMessage(null);
-    }, 4500);
+      toastTimerRef.current = null;
+    }, 2500);
   };
 
   // Firebase Setup & Realtime Subscriptions
@@ -493,7 +507,7 @@ export default function App() {
 
   // Export CSV
   const handleExportCSV = () => {
-    exportRequestsToCSV(quarterRequests, currentQuarter.name);
+    exportRequestsToCSV(quarterRequests, currentQuarter.name, isAdmin);
     showToast(`${currentQuarter.name} 접수 목록이 CSV 파일로 다운로드되었습니다.`, 'info');
   };
 
@@ -554,39 +568,49 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#6CA3CF] sm:p-4 lg:p-6 flex flex-col font-sans">
+      {/* Floating Toast Alert (fixed overlay so layout never shifts) */}
+      {toastMessage && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`fixed top-5 left-1/2 -translate-x-1/2 z-[120] w-[calc(100%-2rem)] max-w-lg px-4 py-3 rounded-[4px] border flex items-center justify-between gap-3 text-xs font-semibold shadow-[0_14px_34px_rgba(24,23,21,0.28)] ${
+            toastMessage.type === 'warning'
+              ? 'bg-[#E94B22] border-[#181715]/25 text-white'
+              : toastMessage.type === 'info'
+              ? 'bg-[#181715] border-[#181715] text-[#EAE2D3]'
+              : 'bg-[#4F8A6B] border-[#181715]/25 text-white'
+          }`}
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            {toastMessage.type === 'warning' ? (
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+            ) : toastMessage.type === 'info' ? (
+              <Info className="w-4 h-4 shrink-0" />
+            ) : (
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+            )}
+            <span className="leading-snug">{toastMessage.text}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (toastTimerRef.current !== null) {
+                window.clearTimeout(toastTimerRef.current);
+                toastTimerRef.current = null;
+              }
+              setToastMessage(null);
+            }}
+            className="opacity-80 hover:opacity-100 font-bold cursor-pointer shrink-0"
+            aria-label="알림 닫기"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       <div className="flex-1 w-full max-w-[1380px] mx-auto bg-[#F4EEE2] text-[#181715] flex flex-col shadow-[0_24px_60px_rgba(24,23,21,0.14)] border border-[#181715]/15">
         {/* Main Viewport */}
         <main className="flex-1 w-full max-w-[1320px] mx-auto px-5 sm:px-8 lg:px-10 py-8 sm:py-10 space-y-10">
-          {/* Toast Alert */}
-          {toastMessage && (
-            <div
-              className={`p-3.5 rounded-[3px] border flex items-center justify-between text-xs font-semibold transition-all ${
-                toastMessage.type === 'warning'
-                  ? 'bg-[#E94B22] border-[#181715]/20 text-white'
-                  : toastMessage.type === 'info'
-                  ? 'bg-[#181715] border-[#181715] text-[#EAE2D3]'
-                  : 'bg-[#4F8A6B] border-[#181715]/20 text-white'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                {toastMessage.type === 'warning' ? (
-                  <AlertTriangle className="w-4 h-4 shrink-0" />
-                ) : toastMessage.type === 'info' ? (
-                  <Info className="w-4 h-4 shrink-0" />
-                ) : (
-                  <CheckCircle2 className="w-4 h-4 shrink-0" />
-                )}
-                <span>{toastMessage.text}</span>
-              </div>
-              <button
-                onClick={() => setToastMessage(null)}
-                className="ml-3 opacity-80 hover:opacity-100 font-bold cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-          )}
-
           {/* Capacity Dashboard */}
           <CapacityDashboard
             summary={capacitySummary}
