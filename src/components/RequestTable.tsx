@@ -69,10 +69,14 @@ export const RequestTable: React.FC<RequestTableProps> = ({
   const [deletingRequest, setDeletingRequest] = useState<VideoRequest | null>(null);
   const [editingRequest, setEditingRequest] = useState<VideoRequest | null>(null);
   const [passwordPromptRequest, setPasswordPromptRequest] = useState<VideoRequest | null>(null);
+  const [passwordPromptAction, setPasswordPromptAction] = useState<'edit' | 'delete'>('edit');
   const [passwordInput, setPasswordInput] = useState<string>('');
   const [passwordError, setPasswordError] = useState<string>('');
 
-  const [noPasswordNoticeRequest, setNoPasswordNoticeRequest] = useState<VideoRequest | null>(null);
+  const [noPasswordNotice, setNoPasswordNotice] = useState<{
+    request: VideoRequest;
+    action: 'edit' | 'delete';
+  } | null>(null);
 
   const formatDisplayText = (value: string) => (isAdmin ? value : maskKeepEdges(value));
 
@@ -119,12 +123,26 @@ export const RequestTable: React.FC<RequestTableProps> = ({
   const handleOpenEdit = (req: VideoRequest) => {
     if (isAdmin) {
       setEditingRequest(req);
-    } else if (req.password) {
+    } else if (req.password && req.password.trim()) {
+      setPasswordPromptAction('edit');
       setPasswordPromptRequest(req);
       setPasswordInput('');
       setPasswordError('');
     } else {
-      setNoPasswordNoticeRequest(req);
+      setNoPasswordNotice({ request: req, action: 'edit' });
+    }
+  };
+
+  const handleOpenDelete = (req: VideoRequest) => {
+    if (isAdmin) {
+      setDeletingRequest(req);
+    } else if (req.password && req.password.trim()) {
+      setPasswordPromptAction('delete');
+      setPasswordPromptRequest(req);
+      setPasswordInput('');
+      setPasswordError('');
+    } else {
+      setNoPasswordNotice({ request: req, action: 'delete' });
     }
   };
 
@@ -134,10 +152,15 @@ export const RequestTable: React.FC<RequestTableProps> = ({
 
     if (passwordPromptRequest.password === passwordInput.trim()) {
       const target = passwordPromptRequest;
+      const action = passwordPromptAction;
       setPasswordPromptRequest(null);
       setPasswordInput('');
       setPasswordError('');
-      setEditingRequest(target);
+      if (action === 'delete') {
+        onDeleteRequest(target.id);
+      } else {
+        setEditingRequest(target);
+      }
     } else {
       setPasswordError('비밀번호가 일치하지 않습니다. 접수 시 입력한 비밀번호를 확인해 주세요.');
     }
@@ -321,9 +344,7 @@ export const RequestTable: React.FC<RequestTableProps> = ({
                 업무소요일 {isAdmin && <span className="text-[#E94B22] font-bold">(+/-)</span>}
               </th>
               <th className="py-3 px-4">희망 완료일</th>
-              <th className="py-3 px-4 text-center w-28">
-                {isAdmin ? '관리' : '수정'}
-              </th>
+              <th className="py-3 px-4 text-center w-32">관리</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[#181715]/12">
@@ -521,17 +542,15 @@ export const RequestTable: React.FC<RequestTableProps> = ({
                           <span>수정</span>
                         </button>
 
-                        {isAdmin && (
-                          <button
-                            type="button"
-                            onClick={() => setDeletingRequest(req)}
-                            className="px-2 py-1 text-xs text-[#E94B22] hover:bg-[#E94B22] hover:text-white bg-[#E94B22]/10 border border-[#E94B22]/35 rounded-[3px] font-bold inline-flex items-center gap-1 transition-colors cursor-pointer"
-                            title="접수 내역 삭제 (관리자 전용)"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                            <span>삭제</span>
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleOpenDelete(req)}
+                          className="px-2 py-1 text-xs text-[#E94B22] hover:bg-[#E94B22] hover:text-white bg-[#E94B22]/10 border border-[#E94B22]/35 rounded-[3px] font-bold inline-flex items-center gap-1 transition-colors cursor-pointer"
+                          title={isAdmin ? '접수 내역 삭제 (관리자 전용)' : '비밀번호 확인 후 삭제'}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>삭제</span>
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -755,20 +774,18 @@ export const RequestTable: React.FC<RequestTableProps> = ({
                   <span>수정하기</span>
                 </button>
 
-                {isAdmin && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const toDelete = selectedRequest;
-                      setSelectedRequest(null);
-                      setDeletingRequest(toDelete);
-                    }}
-                    className="px-3 py-1.5 text-xs text-[#E94B22] hover:text-white bg-[#E94B22]/10 hover:bg-[#E94B22] border border-[#E94B22]/35 rounded-[3px] font-bold inline-flex items-center gap-1 transition-colors cursor-pointer"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>접수 취소/삭제</span>
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const toDelete = selectedRequest;
+                    setSelectedRequest(null);
+                    handleOpenDelete(toDelete);
+                  }}
+                  className="px-3 py-1.5 text-xs text-[#E94B22] hover:text-white bg-[#E94B22]/10 hover:bg-[#E94B22] border border-[#E94B22]/35 rounded-[3px] font-bold inline-flex items-center gap-1 transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>접수 취소/삭제</span>
+                </button>
               </div>
             </div>
           </div>
@@ -786,13 +803,30 @@ export const RequestTable: React.FC<RequestTableProps> = ({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center gap-2">
-              <Lock className="w-4 h-4 text-[#181715] shrink-0" />
-              <h3 className="text-sm font-extrabold">수정 비밀번호 확인</h3>
+              {passwordPromptAction === 'delete' ? (
+                <AlertTriangle className="w-4 h-4 text-[#E94B22] shrink-0" />
+              ) : (
+                <Lock className="w-4 h-4 text-[#181715] shrink-0" />
+              )}
+              <h3 className="text-sm font-extrabold">
+                {passwordPromptAction === 'delete' ? '접수 삭제 비밀번호 확인' : '수정 비밀번호 확인'}
+              </h3>
             </div>
 
             <p className="text-xs text-[#5F5A52] leading-relaxed">
-              <strong className="text-[#181715]">'{passwordPromptRequest.taskName}'</strong> 접수 건을 수정하려면 신청 시 설정한 비밀번호를 입력해주세요.
+              <strong className="text-[#181715]">'{passwordPromptRequest.taskName}'</strong> 접수 건을{' '}
+              {passwordPromptAction === 'delete' ? '삭제' : '수정'}하려면 신청 시 설정한 비밀번호를 입력해주세요.
             </p>
+
+            {passwordPromptAction === 'delete' && (
+              <div className="p-2.5 rounded-[3px] bg-[#E94B22]/10 border border-[#E94B22]/35 text-[11px] text-[#181715] leading-relaxed">
+                비밀번호 확인 후 즉시 삭제되며, 차감되었던{' '}
+                <strong className="font-mono text-[#E94B22]">
+                  {Math.round(passwordPromptRequest.requiredDays)}일
+                </strong>
+                의 제작 가용 일수가 반환됩니다.
+              </div>
+            )}
 
             <form onSubmit={handleVerifyPassword} className="space-y-3">
               <div>
@@ -823,9 +857,13 @@ export const RequestTable: React.FC<RequestTableProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-1.5 text-xs font-bold text-[#EAE2D3] bg-[#181715] hover:bg-[#E94B22] hover:text-white rounded-[3px] transition-colors cursor-pointer"
+                  className={`px-4 py-1.5 text-xs font-bold rounded-[3px] transition-colors cursor-pointer ${
+                    passwordPromptAction === 'delete'
+                      ? 'text-white bg-[#E94B22] hover:bg-[#c73c17]'
+                      : 'text-[#EAE2D3] bg-[#181715] hover:bg-[#E94B22] hover:text-white'
+                  }`}
                 >
-                  확인
+                  {passwordPromptAction === 'delete' ? '삭제 확인' : '확인'}
                 </button>
               </div>
             </form>
@@ -834,10 +872,10 @@ export const RequestTable: React.FC<RequestTableProps> = ({
       )}
 
       {/* Passwordless Request Notice Modal (Non-admin) */}
-      {noPasswordNoticeRequest && (
+      {noPasswordNotice && (
         <div
           className="fixed inset-0 z-[100] bg-[#181715]/65 backdrop-blur-xs flex items-center justify-center p-4"
-          onClick={() => setNoPasswordNoticeRequest(null)}
+          onClick={() => setNoPasswordNotice(null)}
         >
           <div
             className="bg-[#F5F0E6] rounded-[4px] shadow-[0_24px_60px_rgba(24,23,21,0.3)] max-w-sm w-full p-5 border border-[#181715]/25 space-y-4 text-[#181715]"
@@ -845,17 +883,21 @@ export const RequestTable: React.FC<RequestTableProps> = ({
           >
             <div className="flex items-center gap-2">
               <Lock className="w-4 h-4 text-[#181715] shrink-0" />
-              <h3 className="text-sm font-extrabold">수정 권한 안내</h3>
+              <h3 className="text-sm font-extrabold">
+                {noPasswordNotice.action === 'delete' ? '삭제 권한 안내' : '수정 권한 안내'}
+              </h3>
             </div>
 
             <p className="text-xs text-[#5F5A52] leading-relaxed">
-              <strong className="text-[#181715]">'{noPasswordNoticeRequest.taskName}'</strong> 접수 건은 작성자 비밀번호가 설정되지 않아 일반 모드에서는 수정할 수 없습니다. 관리자 모드에서 수정해 주세요.
+              <strong className="text-[#181715]">'{noPasswordNotice.request.taskName}'</strong> 접수 건은 작성자 비밀번호가 설정되지 않아 일반 모드에서는{' '}
+              {noPasswordNotice.action === 'delete' ? '삭제' : '수정'}할 수 없습니다. 관리자 모드에서{' '}
+              {noPasswordNotice.action === 'delete' ? '삭제' : '수정'}해 주세요.
             </p>
 
             <div className="flex items-center justify-end pt-2 border-t border-[#181715]/12">
               <button
                 type="button"
-                onClick={() => setNoPasswordNoticeRequest(null)}
+                onClick={() => setNoPasswordNotice(null)}
                 className="px-4 py-1.5 text-xs font-bold text-[#EAE2D3] bg-[#181715] hover:bg-[#E94B22] hover:text-white rounded-[3px] transition-colors cursor-pointer"
               >
                 확인
