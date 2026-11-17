@@ -50,6 +50,22 @@ const getProducerDotColor = (producer: string) => {
   return 'bg-[#8A8275]';
 };
 
+const formatCreatedAt = (createdAt: string, includeTime: boolean): string => {
+  const date = new Date(createdAt);
+  if (isNaN(date.getTime())) return createdAt;
+  if (!includeTime) {
+    return date.toLocaleDateString('ko-KR');
+  }
+  return date.toLocaleString('ko-KR', {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+};
+
 export const RequestTable: React.FC<RequestTableProps> = ({
   requests,
   categories,
@@ -522,7 +538,7 @@ export const RequestTable: React.FC<RequestTableProps> = ({
                         {req.dueDate}
                       </div>
                       <div className="font-mono text-[10px] text-[#5F5A52] mt-0.5">
-                        접수: {new Date(req.createdAt).toLocaleDateString('ko-KR')}
+                        접수: {formatCreatedAt(req.createdAt, isAdmin)}
                       </div>
                     </td>
 
@@ -680,7 +696,7 @@ export const RequestTable: React.FC<RequestTableProps> = ({
                     {selectedRequest.dueDate}
                   </div>
                   <div className="text-[#5F5A52] font-mono text-[10px] mt-0.5">
-                    신청: {new Date(selectedRequest.createdAt).toLocaleDateString('ko-KR')}
+                    신청: {formatCreatedAt(selectedRequest.createdAt, isAdmin)}
                   </div>
                 </div>
               </div>
